@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AKI 风险预测系统</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>基于多模态数据的术后 AKI 风险预测</h1>
+    <p class="subtitle">输入结构化指标、术后病历文本与时间序列数据，点击预测即可获得风险评估。</p>
+    <div id="message" class="message"></div>
+    <form id="predict-form" onsubmit="event.preventDefault(); submitPrediction();">
+        <label for="clinical">临床特征 (逗号分隔数字，默认 4 个)：</label>
+        <input id="clinical" type="text" placeholder="例如：85.0,1.2,3.5,0.9" required>
+
+        <label for="note_text">病历文本：</label>
+        <textarea id="note_text" rows="4" placeholder="输入关键术后描述" required></textarea>
+
+        <label for="timeseries">时间序列 (每行表示一条记录，逗号分隔特征，默认每行 2 个值)：</label>
+        <textarea id="timeseries" rows="5" placeholder="80,120\n78,115\n75,118" required></textarea>
+
+        <button type="submit">预测风险</button>
+    </form>
+
+    <div class="result" id="result" hidden>
+        <h3>预测结果</h3>
+        <p>风险评分：<span id="risk-score">--</span></p>
+        <p>风险分层：<span id="risk-category">--</span></p>
+    </div>
+</div>
+
+<script>
+    function parseClinical(text) {
+        return text.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+    }
+
+    function parseTimeseries(text) {
+        const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+        return lines.map(line => line.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v)));
+    }
+
+    function categorize(score) {
+        if (score < 0.33) return 'Low';
+        if (score < 0.66) return 'Medium';
+        return 'High';
+    }
+
+    async function submitPrediction() {
+        const clinical = parseClinical(document.getElementById('clinical').value);
+        const noteText = document.getElementById('note_text').value;
+        const ts = parseTimeseries(document.getElementById('timeseries').value);
+
+        const message = document.getElementById('message');
+        const resultBlock = document.getElementById('result');
+        message.textContent = '';
+        resultBlock.hidden = true;
+
+        try {
+            const response = await fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clinical_features: clinical,
+                    note_text: noteText,
+                    timeseries: ts
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '预测失败');
+            }
+
+            const riskScore = Number(data.risk_score || 0).toFixed(4);
+            document.getElementById('risk-score').textContent = riskScore;
+            document.getElementById('risk-category').textContent = categorize(Number(riskScore));
+            resultBlock.hidden = false;
+        } catch (err) {
+            message.textContent = err.message;
+            message.classList.add('error');
+        }
+    }
+</script>
+</body>
+</html>
